@@ -1,0 +1,10 @@
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: /Users/your-user/.cloudflared/REPLACE_WITH_TUNNEL_ID.json
+
+ingress:
+  - hostname: music.yourdomain.com
+    service: http://127.0.0.1:8786
+    originRequest:
+      httpHostHeader: music.yourdomain.com
+      noTLSVerify: true
+  - service: http_status:404

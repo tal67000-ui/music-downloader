@@ -76,6 +76,15 @@ h1 {
   color: rgba(244, 239, 232, 0.72);
 }
 
+.install-hint {
+  margin-bottom: 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  color: #ffe2b0;
+  background: rgba(255, 180, 91, 0.1);
+  border: 1px solid rgba(255, 180, 91, 0.16);
+}
+
 .converter-form,
 .source-panel,
 .result-card {

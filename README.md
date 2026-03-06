@@ -170,6 +170,17 @@ Serves a completed output file.
 
 4. Open the frontend at `http://localhost:5173`.
 
+## Private Sharing
+
+Recommended path for trusted users:
+
+- run the built app locally
+- expose it with Cloudflare Tunnel
+- protect it with Cloudflare Access
+- let users install it as a browser-based app icon
+
+See [ACCESS.md](/Users/taljoseph/Documents/GitHub/Music%20Downloader/ACCESS.md) for the full setup guide and security model.
+
 ## Useful Commands
 
 ```bash

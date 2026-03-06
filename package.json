@@ -14,7 +14,11 @@
     "build": "npm run build:server && npm run build:client",
     "build:server": "npm --workspace server run build",
     "build:client": "npm --workspace client run build",
+    "share:build": "npm run build",
     "start": "npm --workspace server run start",
+    "share:start": "npm run start",
+    "share:up": "./scripts/share-start.sh",
+    "share:down": "./scripts/share-stop.sh",
     "check": "npm run build"
   },
   "devDependencies": {

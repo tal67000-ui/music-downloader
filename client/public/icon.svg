@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Music Downloader">
+  <defs>
+    <linearGradient id="bg" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffb45b" />
+      <stop offset="100%" stop-color="#ffe397" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#121417" />
+  <rect x="40" y="40" width="432" height="432" rx="88" fill="url(#bg)" opacity="0.12" />
+  <path d="M296 96v196.8a64 64 0 1 1-40-59.33V144l152-32v136.8a64 64 0 1 1-40-59.33V96z" fill="#ffe7b7" />
+</svg>

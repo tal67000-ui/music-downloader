@@ -256,6 +256,9 @@ export function App() {
           Paste a source page like a YouTube channel, playlist, or any supported multi-video feed. The app will list the
           available tracks, let you choose what to keep, and then run the conversions in sequence.
         </p>
+        <p className="install-hint">
+          Tip: after you open this through your shared private URL, install it from your browser menu to get a desktop or home-screen icon.
+        </p>
 
         <form className="converter-form" onSubmit={onInspect}>
           <label className="field">
