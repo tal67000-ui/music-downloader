@@ -1,4 +1,4 @@
-import type { ApiErrorDetails, HealthResponse, JobRecord, OutputFormat, QualityPreset } from './types';
+import type { ApiErrorDetails, HealthResponse, JobRecord, OutputFormat, QualityPreset, SourceEntry, SourceInspection } from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -30,10 +30,21 @@ export async function fetchHealth() {
   return parseJson<HealthResponse>(response);
 }
 
-export async function createJob(input: {
-  url: string;
+export async function inspectSource(url: string) {
+  const response = await fetch('/api/sources/inspect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+
+  return parseJson<{ source: SourceInspection }>(response);
+}
+
+export async function createBatchJob(input: {
+  sourceUrl: string;
   format: OutputFormat;
   quality: QualityPreset;
+  items: SourceEntry[];
 }) {
   const response = await fetch('/api/jobs', {
     method: 'POST',

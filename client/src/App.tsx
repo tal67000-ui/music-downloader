@@ -1,7 +1,7 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 
-import { ApiError, createJob, fetchHealth, fetchJob } from './api';
-import type { HealthResponse, JobRecord, OutputFormat, QualityPreset } from './types';
+import { ApiError, createBatchJob, fetchHealth, fetchJob, inspectSource } from './api';
+import type { HealthResponse, JobRecord, OutputFormat, QualityPreset, SourceEntry, SourceInspection } from './types';
 
 const formatLabels: Record<OutputFormat, string> = {
   mp3: 'MP3',
@@ -13,13 +13,32 @@ const qualityLabels: Record<QualityPreset, string> = {
   high: 'High',
 };
 
+function formatDuration(seconds?: number) {
+  if (!seconds || seconds <= 0) {
+    return 'Unknown length';
+  }
+
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = Math.floor(seconds % 60);
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${remainingSeconds}s`;
+  }
+
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
 export function App() {
   const [url, setUrl] = useState('');
   const [format, setFormat] = useState<OutputFormat>('mp3');
   const [quality, setQuality] = useState<QualityPreset>('high');
+  const [source, setSource] = useState<SourceInspection | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [job, setJob] = useState<JobRecord | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loadingInspect, setLoadingInspect] = useState(false);
+  const [loadingStart, setLoadingStart] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryAt, setRetryAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -70,46 +89,83 @@ export function App() {
     };
   }, [job]);
 
-  async function onSubmit(event: FormEvent) {
+  async function onInspect(event: FormEvent) {
     event.preventDefault();
-    setLoading(true);
+    setLoadingInspect(true);
+    setError(null);
+    setJob(null);
+
+    try {
+      const response = await inspectSource(url);
+      setSource(response.source);
+      setSelectedIds(response.source.entries.map((entry) => entry.id));
+    } catch (err) {
+      setSource(null);
+      setSelectedIds([]);
+      setError(err instanceof Error ? err.message : 'Unable to inspect source');
+    } finally {
+      setLoadingInspect(false);
+    }
+  }
+
+  async function onStartConversion() {
+    if (!source) {
+      return;
+    }
+
+    const selectedItems = source.entries.filter((entry) => selectedIds.includes(entry.id));
+    if (selectedItems.length === 0) {
+      setError('Select at least one video before starting the serial conversion.');
+      return;
+    }
+
+    setLoadingStart(true);
     setError(null);
     setRetryAt(null);
 
     try {
-      const response = await createJob({ url, format, quality });
+      const response = await createBatchJob({
+        sourceUrl: source.sourceUrl,
+        format,
+        quality,
+        items: selectedItems,
+      });
       setJob(response.job);
     } catch (err) {
       setJob(null);
       if (err instanceof ApiError && err.status === 429) {
         setRetryAt(err.retryAt ?? null);
       }
-      setError(err instanceof Error ? err.message : 'Unable to create job');
+      setError(err instanceof Error ? err.message : 'Unable to start serial conversion');
     } finally {
-      setLoading(false);
+      setLoadingStart(false);
     }
   }
 
+  const selectedItems = useMemo(
+    () => (source ? source.entries.filter((entry) => selectedIds.includes(entry.id)) : []),
+    [selectedIds, source],
+  );
+  const selectedEstimatedSeconds = selectedItems.reduce((sum, entry) => sum + (entry.durationSeconds ?? 0), 0);
   const retryMessage =
     retryAt !== null ? `Rate limit reached. Try again in ${Math.max(0, Math.ceil((retryAt - now) / 1000))}s.` : null;
 
-  const submitDisabled = loading || !health?.dependencies.ready || (retryAt !== null && retryAt > now);
-
   return (
-    <main className="page-shell">
+    <main className="page-shell batch-layout">
       <section className="hero-card">
-        <div className="eyebrow">Audio extraction, optimized for listening</div>
-        <h1>Convert any supported video or audio link into a clean download.</h1>
+        <div className="eyebrow">Serial downloader for playlists, channels, and source pages</div>
+        <h1>Load a video list, choose tracks, then convert them one by one.</h1>
         <p className="lede">
-          Paste a media URL, pick your format, and get a high-quality audio file you can stream or save.
+          Paste a source page like a YouTube channel, playlist, or any supported multi-video feed. The app will list the
+          available tracks, let you choose what to keep, and then run the conversions in sequence.
         </p>
 
-        <form className="converter-form" onSubmit={onSubmit}>
+        <form className="converter-form" onSubmit={onInspect}>
           <label className="field">
-            <span>Media URL</span>
+            <span>Source URL</span>
             <input
               type="url"
-              placeholder="https://example.com/watch?v=..."
+              placeholder="https://www.youtube.com/@Revealedrec/videos"
               value={url}
               onChange={(event) => setUrl(event.target.value)}
               required
@@ -134,9 +190,19 @@ export function App() {
             </label>
           </div>
 
-          <button className="submit-button" type="submit" disabled={submitDisabled}>
-            {loading ? 'Starting conversion...' : 'Convert to audio'}
-          </button>
+          <div className="action-row">
+            <button className="submit-button" type="submit" disabled={loadingInspect || !health?.dependencies.ready}>
+              {loadingInspect ? 'Loading video list...' : 'Load video list'}
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={onStartConversion}
+              disabled={loadingStart || !health?.dependencies.ready || selectedItems.length === 0}
+            >
+              {loadingStart ? 'Starting serial conversion...' : 'Start conversion'}
+            </button>
+          </div>
         </form>
 
         <div className="status-grid">
@@ -144,14 +210,71 @@ export function App() {
           <QualityPanel format={format} quality={quality} />
         </div>
 
+        {source ? (
+          <section className="source-panel">
+            <div className="source-header">
+              <div>
+                <h2>{source.title}</h2>
+                <p className="muted">
+                  {source.entryCount} item{source.entryCount === 1 ? '' : 's'} detected
+                </p>
+              </div>
+              <div className="selection-summary">
+                <strong>{selectedItems.length} selected</strong>
+                <span>{selectedEstimatedSeconds > 0 ? formatDuration(selectedEstimatedSeconds) : 'No time estimate yet'}</span>
+              </div>
+            </div>
+
+            <div className="selection-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setSelectedIds(source.entries.map((entry) => entry.id))}
+              >
+                Select all
+              </button>
+              <button type="button" className="ghost-button" onClick={() => setSelectedIds([])}>
+                Clear all
+              </button>
+            </div>
+
+            <div className="entry-list">
+              {source.entries.map((entry) => {
+                const checked = selectedIds.includes(entry.id);
+                const liveItem = job?.items.find((item) => item.id === entry.id);
+                return (
+                  <label className={`entry-row ${checked ? 'is-selected' : ''}`} key={entry.id}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        setSelectedIds((current) =>
+                          checked ? current.filter((id) => id !== entry.id) : [...current, entry.id],
+                        )
+                      }
+                    />
+                    <div className="entry-copy">
+                      <strong>{entry.title}</strong>
+                      <span className="muted">
+                        #{entry.index} • {formatDuration(entry.durationSeconds)}
+                      </span>
+                    </div>
+                    {liveItem ? <span className={`item-pill ${liveItem.status}`}>{liveItem.status}</span> : null}
+                  </label>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+
         {retryMessage ? <p className="warning-banner">{retryMessage}</p> : null}
         {error ? <p className="error-banner">{error}</p> : null}
       </section>
 
       <section className="result-card">
-        <h2>Current job</h2>
+        <h2>Serial conversion run</h2>
         {!job ? (
-          <p className="muted">No job submitted yet.</p>
+          <p className="muted">Inspect a source, choose the tracks you want, then start the serial conversion.</p>
         ) : (
           <>
             <div className="job-meta">
@@ -160,12 +283,14 @@ export function App() {
                 <strong>{job.status}</strong>
               </div>
               <div>
-                <span className="meta-label">Stage</span>
-                <strong>{job.stage}</strong>
+                <span className="meta-label">Completed</span>
+                <strong>
+                  {job.completedCount}/{job.itemCount}
+                </strong>
               </div>
               <div>
-                <span className="meta-label">Progress</span>
-                <strong>{job.progress}%</strong>
+                <span className="meta-label">Failures</span>
+                <strong>{job.failedCount}</strong>
               </div>
             </div>
 
@@ -175,35 +300,53 @@ export function App() {
 
             <dl className="details-list">
               <div>
-                <dt>Requested URL</dt>
+                <dt>Current stage</dt>
+                <dd>{job.stage}</dd>
+              </div>
+              <div>
+                <dt>Source</dt>
                 <dd>{job.sourceUrl}</dd>
               </div>
               <div>
-                <dt>Output</dt>
+                <dt>Output profile</dt>
                 <dd>
-                  {formatLabels[job.request.format]} / {qualityLabels[job.request.quality]}
+                  {formatLabels[job.format]} / {qualityLabels[job.quality]}
                 </dd>
               </div>
-              {job.title ? (
-                <div>
-                  <dt>Detected title</dt>
-                  <dd>{job.title}</dd>
-                </div>
-              ) : null}
+              <div>
+                <dt>Estimated total</dt>
+                <dd>{formatDuration(job.estimatedTotalSeconds)}</dd>
+              </div>
+              <div>
+                <dt>Estimated remaining</dt>
+                <dd>{formatDuration(job.estimatedRemainingSeconds)}</dd>
+              </div>
             </dl>
 
-            {job.status === 'completed' && job.downloadPath ? (
-              <div className="download-panel">
-                <audio controls src={job.downloadPath} className="audio-preview">
-                  Your browser does not support audio playback.
-                </audio>
-                <a className="download-link" href={job.downloadPath} download={job.downloadName}>
-                  Download {job.downloadName}
-                </a>
-              </div>
-            ) : null}
-
-            {job.status === 'failed' ? <p className="error-banner">{job.error}</p> : null}
+            <div className="batch-item-list">
+              {job.items.map((item) => (
+                <article className={`batch-item ${job.currentItemId === item.id ? 'is-live' : ''}`} key={item.id}>
+                  <div className="batch-item-top">
+                    <div>
+                      <strong>{item.title}</strong>
+                      <p className="muted">
+                        #{item.index} • {item.stage}
+                      </p>
+                    </div>
+                    <span className={`item-pill ${item.status}`}>{item.status}</span>
+                  </div>
+                  <div className="mini-progress">
+                    <div className="mini-progress-bar" style={{ width: `${item.progress}%` }} />
+                  </div>
+                  {item.downloadPath ? (
+                    <a className="download-link compact-link" href={item.downloadPath} download={item.downloadName}>
+                      Download {item.downloadName}
+                    </a>
+                  ) : null}
+                  {item.error ? <p className="error-banner compact-banner">{item.error}</p> : null}
+                </article>
+              ))}
+            </div>
           </>
         )}
       </section>
@@ -227,7 +370,7 @@ function StatusPanel({ health }: { health: HealthResponse | null }) {
       <ul className="status-list">
         <li>{health.dependencies.ffmpegInstalled ? 'ffmpeg ready' : 'ffmpeg missing'}</li>
         <li>{health.dependencies.ytDlpInstalled ? 'yt-dlp ready' : 'yt-dlp missing'}</li>
-        <li>{health.dependencies.ready ? 'Conversions enabled' : 'Install dependencies to enable conversions'}</li>
+        <li>{health.dependencies.ready ? 'Serial conversions enabled' : 'Install dependencies to enable conversions'}</li>
       </ul>
     </div>
   );
@@ -243,11 +386,11 @@ function QualityPanel({
   const description =
     format === 'mp3'
       ? quality === 'high'
-        ? 'Targets MP3 at 320 kbps when the source supports it.'
-        : 'Targets MP3 at 192 kbps for a smaller download.'
+        ? 'Sequentially exports selected videos as MP3 at up to 320 kbps.'
+        : 'Sequentially exports selected videos as MP3 at 192 kbps.'
       : quality === 'high'
-        ? 'Targets AAC/M4A at 256 kbps for efficient high-quality playback.'
-        : 'Targets AAC/M4A at 160 kbps for balanced size and clarity.';
+        ? 'Sequentially exports selected videos as AAC/M4A at up to 256 kbps.'
+        : 'Sequentially exports selected videos as AAC/M4A at 160 kbps.';
 
   return (
     <div className="panel">

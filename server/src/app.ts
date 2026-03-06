@@ -3,10 +3,49 @@ import express, { type Request, type Response } from 'express';
 import path from 'node:path';
 
 import { config } from './config.js';
-import { createJob, getJob, listJobs } from './jobStore.js';
+import { createJob, getJob, inspectSource, listJobs } from './jobStore.js';
 import { getDependencyStatus } from './mediaTools.js';
 import { consumeRateLimit } from './rateLimit.js';
-import { createJobSchema } from './validation.js';
+import { createJobSchema, inspectSourceSchema } from './validation.js';
+
+async function ensureDependencies(res: Response) {
+  const dependencies = await getDependencyStatus();
+  if (!dependencies.ready) {
+    res.status(503).json({
+      error: 'Missing required binaries',
+      dependencies,
+    });
+    return null;
+  }
+
+  return dependencies;
+}
+
+export async function handleInspectSource(req: Request, res: Response) {
+  const parsed = inspectSourceSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    res.status(400).json({
+      error: 'Invalid request',
+      details: parsed.error.flatten(),
+    });
+    return;
+  }
+
+  const dependencies = await ensureDependencies(res);
+  if (!dependencies) {
+    return;
+  }
+
+  try {
+    const source = await inspectSource(parsed.data.url);
+    res.json({ source });
+  } catch (error) {
+    res.status(422).json({
+      error: error instanceof Error ? error.message : 'Unable to inspect source',
+    });
+  }
+}
 
 export async function handleCreateJob(req: Request, res: Response) {
   const limit = consumeRateLimit(req.ip);
@@ -30,12 +69,8 @@ export async function handleCreateJob(req: Request, res: Response) {
     return;
   }
 
-  const dependencies = await getDependencyStatus();
-  if (!dependencies.ready) {
-    res.status(503).json({
-      error: 'Missing required binaries',
-      dependencies,
-    });
+  const dependencies = await ensureDependencies(res);
+  if (!dependencies) {
     return;
   }
 
@@ -73,6 +108,7 @@ export function createApp() {
     });
   });
 
+  app.post('/api/sources/inspect', handleInspectSource);
   app.get('/api/jobs', (_req, res) => {
     res.json({ jobs: listJobs() });
   });

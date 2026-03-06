@@ -40,8 +40,28 @@ const urlSchema = z
     return !isBlockedHostname(parsed.hostname);
   }, 'Local and private network URLs are not allowed.');
 
-export const createJobSchema = z.object({
+const sourceEntrySchema = z.object({
+  id: z.string().min(1),
   url: urlSchema,
-  format: z.enum(['mp3', 'm4a']).default('mp3'),
-  quality: z.enum(['standard', 'high']).default('high'),
+  title: z.string().min(1),
+  index: z.number().int().positive(),
+  durationSeconds: z.number().positive().optional(),
 });
+
+export const inspectSourceSchema = z.object({
+  url: urlSchema,
+});
+
+export const createJobSchema = z.union([
+  z.object({
+    url: urlSchema,
+    format: z.enum(['mp3', 'm4a']).default('mp3'),
+    quality: z.enum(['standard', 'high']).default('high'),
+  }),
+  z.object({
+    sourceUrl: urlSchema,
+    format: z.enum(['mp3', 'm4a']).default('mp3'),
+    quality: z.enum(['standard', 'high']).default('high'),
+    items: z.array(sourceEntrySchema).min(1).max(200),
+  }),
+]);
