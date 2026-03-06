@@ -52,6 +52,16 @@ export const inspectSourceSchema = z.object({
   url: urlSchema,
 });
 
+export const recommendationSchema = z.object({
+  title: z.string().trim().min(1),
+  artist: z.string().trim().optional(),
+  sourceUrl: urlSchema.optional(),
+});
+
+export const resolveRecommendationSchema = z.object({
+  query: z.string().trim().min(1).max(240),
+});
+
 export const createJobSchema = z.union([
   z.object({
     url: urlSchema,

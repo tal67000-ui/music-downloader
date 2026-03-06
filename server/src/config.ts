@@ -26,4 +26,6 @@ export const config = {
   ffmpegPath: process.env.FFMPEG_PATH ?? 'ffmpeg',
   trustProxy: process.env.TRUST_PROXY === 'true',
   mediaProxyUrl: process.env.MEDIA_PROXY_URL?.trim() || null,
+  lastfmApiKey: process.env.LASTFM_API_KEY?.trim() || null,
+  musicBrainzContact: process.env.MUSICBRAINZ_CONTACT?.trim() || null,
 };

@@ -2,15 +2,16 @@
 
 ## What This Repo Is
 
-This is a local-first web app that converts a remote media URL into an audio download.
+This is a local-first web app that converts remote media into audio downloads and suggests similar music from completed tracks.
 
 Primary user flow:
 
-1. User pastes a video or audio URL.
-2. User chooses `mp3` or `m4a` and a quality preset.
-3. Backend creates a job and runs `yt-dlp` + `ffmpeg`.
-4. Frontend polls the job until completion.
-5. User previews and downloads the finished audio file.
+1. User pastes a source URL.
+2. App inspects the source and lists candidate videos/tracks.
+3. User selects tracks and chooses `mp3` or `m4a` plus a quality preset.
+4. Backend creates a serial batch job and runs `yt-dlp` + `ffmpeg` one item at a time.
+5. Frontend polls the batch until completion.
+6. User previews/downloads finished audio files and can request similar music recommendations.
 
 ## Tech Stack
 
@@ -33,6 +34,7 @@ Primary user flow:
 ## Current Runtime Model
 
 - job state is stored in memory
+- recommendation cache is stored in memory
 - request rate limiting is stored in memory
 - conversion concurrency is capped by `MAX_CONCURRENT_JOBS`
 - output cleanup is time-based
@@ -43,17 +45,19 @@ This means restarts clear active job state and rate-limit buckets.
 ## Important Files
 
 - `server/src/app.ts`
-  API wiring and testable job creation handler.
+  API wiring for source inspection, batch creation, job polling, and recommendations.
 - `server/src/jobStore.ts`
-  In-memory jobs, queueing, conversion execution, cleanup.
+  In-memory batch jobs, queueing, conversion execution, cleanup.
+- `server/src/recommendations.ts`
+  MusicBrainz and Last.fm recommendation pipeline with caching and normalization.
 - `server/src/progress.ts`
   Parses `yt-dlp` stderr into user-facing progress updates.
 - `server/src/validation.ts`
-  Request validation and private/local network URL blocking.
+  Request validation for source inspection, batch creation, recommendations, and private/local network URL blocking.
 - `client/src/App.tsx`
-  Main UI, polling flow, error handling, rate-limit UX.
+  Main UI for source selection, serial conversions, polling, recommendation lookup, and rate-limit UX.
 - `.env`
-  Local runtime configuration, including binary paths.
+  Local runtime configuration, including binary paths and optional recommendation provider keys.
 
 ## Environment Notes
 
@@ -63,6 +67,8 @@ Expected local configuration:
 
 - `YT_DLP_PATH=/absolute/path/to/bin/yt-dlp_macos`
 - `FFMPEG_PATH=/Users/taljoseph/Library/Python/3.9/lib/python/site-packages/imageio_ffmpeg/binaries/ffmpeg-macos-aarch64-v7.1`
+- `LASTFM_API_KEY=...` for better similar-track recommendations
+- `MUSICBRAINZ_CONTACT=you@example.com` for MusicBrainz-friendly requests
 
 Reason:
 
@@ -101,11 +107,16 @@ npm --workspace server run test
 ## Current Features
 
 - URL submission for media conversion
+- source inspection for multi-video pages
+- check/uncheck selection before conversion
+- serial batch conversion
 - `mp3` and `m4a` output
 - `standard` and `high` quality presets
 - job polling
 - approximate live progress parsing
 - preview/download UI
+- similar-music suggestions for completed tracks
+- downloader-ready recommendation resolution back into the conversion flow
 - in-memory rate limiting
 - local/private network URL rejection
 - YouTube support using the standalone `yt-dlp` binary
@@ -118,6 +129,7 @@ npm --workspace server run test
 - no distributed queue
 - no durable retries
 - not production-scaled
+- recommendation quality depends on metadata coverage from MusicBrainz and Last.fm
 
 ## If You Modify This Repo
 
@@ -136,6 +148,6 @@ npm run build
 
 - replace polling with SSE
 - add persistent job storage
+- add richer recommendation ranking or queue recommended tracks directly
 - add structured logging around subprocess failures
-- improve frontend messaging for site-specific extractor failures
 - add end-to-end browser automation for the happy path

@@ -1,4 +1,13 @@
-import type { ApiErrorDetails, HealthResponse, JobRecord, OutputFormat, QualityPreset, SourceEntry, SourceInspection } from './types';
+import type {
+  ApiErrorDetails,
+  HealthResponse,
+  JobRecord,
+  OutputFormat,
+  QualityPreset,
+  RecommendationResponse,
+  SourceEntry,
+  SourceInspection,
+} from './types';
 
 export class ApiError extends Error {
   status: number;
@@ -55,7 +64,45 @@ export async function createBatchJob(input: {
   return parseJson<{ job: JobRecord }>(response);
 }
 
+export async function createSingleJob(input: {
+  url: string;
+  format: OutputFormat;
+  quality: QualityPreset;
+}) {
+  const response = await fetch('/api/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+
+  return parseJson<{ job: JobRecord }>(response);
+}
+
 export async function fetchJob(id: string) {
   const response = await fetch(`/api/jobs/${id}`);
   return parseJson<{ job: JobRecord }>(response);
+}
+
+export async function fetchRecommendations(input: {
+  title: string;
+  artist?: string;
+  sourceUrl?: string;
+}) {
+  const response = await fetch('/api/recommendations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+
+  return parseJson<RecommendationResponse>(response);
+}
+
+export async function resolveRecommendationSource(query: string) {
+  const response = await fetch('/api/recommendations/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  });
+
+  return parseJson<{ source: SourceEntry }>(response);
 }

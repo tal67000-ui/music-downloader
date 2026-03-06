@@ -2,15 +2,16 @@
 
 ## Project
 
-Music Downloader is a local-first web app that converts a remote media URL into a downloadable audio file.
+Music Downloader is a local-first web app that converts remote media into downloadable audio files and suggests similar music from completed tracks.
 
 Core flow:
 
-1. User submits a video or audio URL.
-2. Frontend creates a backend job.
-3. Backend uses `yt-dlp` and `ffmpeg` to extract/transcode audio.
-4. Frontend polls job status until completion.
-5. User previews and downloads the result.
+1. User submits a source URL.
+2. Frontend inspects the source and lets the user select candidate videos.
+3. Backend creates a serial batch job.
+4. Backend uses `yt-dlp` and `ffmpeg` to extract/transcode audio one item at a time.
+5. Frontend polls job status until completion.
+6. User previews/downloads results and can request similar tracks.
 
 ## Repo Layout
 
@@ -23,21 +24,24 @@ Core flow:
 ## Important Files
 
 - `server/src/app.ts`
-  Main API wiring and testable `handleCreateJob` logic.
+  Main API wiring for source inspection, batch creation, polling, and recommendations.
 - `server/src/jobStore.ts`
-  In-memory job store, queueing, conversion execution, cleanup.
+  In-memory batch job store, queueing, conversion execution, cleanup.
+- `server/src/recommendations.ts`
+  Similar-music lookup and ranking using MusicBrainz and Last.fm.
 - `server/src/progress.ts`
   Maps `yt-dlp` stderr into app progress states.
 - `server/src/validation.ts`
   Input validation and private/local network blocking.
 - `client/src/App.tsx`
-  Main UI, polling flow, download state, rate-limit messaging.
+  Main UI for source selection, serial conversion, recommendation lookup, and rate-limit messaging.
 - `.env`
-  Runtime configuration, especially `YT_DLP_PATH` and `FFMPEG_PATH`.
+  Runtime configuration, especially `YT_DLP_PATH`, `FFMPEG_PATH`, `LASTFM_API_KEY`, and `MUSICBRAINZ_CONTACT`.
 
 ## Runtime Assumptions
 
 - Jobs are stored in memory.
+- Recommendation cache is stored in memory.
 - Rate limits are stored in memory.
 - Output files are written to local disk.
 - Job status is fetched by polling, not SSE/WebSockets.
@@ -51,6 +55,8 @@ Current working local setup:
 
 - `YT_DLP_PATH=/absolute/path/to/bin/yt-dlp_macos`
 - `FFMPEG_PATH=/Users/taljoseph/Library/Python/3.9/lib/python/site-packages/imageio_ffmpeg/binaries/ffmpeg-macos-aarch64-v7.1`
+- `LASTFM_API_KEY=...`
+- `MUSICBRAINZ_CONTACT=you@example.com`
 
 Important:
 
@@ -87,11 +93,16 @@ npm run dev
 ## Current Features
 
 - URL submission
+- source inspection for multi-video pages
+- check/uncheck batch selection
+- serial conversion queue
 - `mp3` and `m4a` output
 - `standard` and `high` quality presets
 - job polling
 - approximate progress updates
 - preview and download UI
+- similar-music suggestions for completed tracks
+- downloader-ready recommendation resolution for one-click follow-up conversions
 - in-memory rate limiting
 - private/local URL blocking
 - working YouTube conversion via standalone `yt-dlp` binary
@@ -104,11 +115,13 @@ npm run dev
 - no durable retries
 - no real-time push updates
 - not production-scaled
+- recommendation quality depends on external metadata provider coverage
 
 ## Good Next Steps
 
 - replace polling with SSE
 - add persistent job storage
+- add queue-from-recommendation flow
 - add structured backend logging for subprocess failures
 - improve frontend messaging for extractor/site-specific failures
 - add end-to-end browser automation

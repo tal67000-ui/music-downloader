@@ -4,13 +4,14 @@ Web app that accepts a media URL, extracts the best available audio, and returns
 
 ## Project Summary
 
-This project turns a pasted media URL into a downloadable audio file with a fast browser flow:
+This project turns a pasted media URL into downloadable audio files with a fast browser flow:
 
-- frontend form for URL, format, and quality selection
-- backend job creation and polling
+- frontend form for source inspection, selection, and quality selection
+- backend batch job creation and polling
 - `yt-dlp` download/extraction pipeline
 - `ffmpeg` audio transcoding
-- output preview and download
+- serial conversion queue
+- output preview, download, and similar-music suggestions
 
 The current implementation is optimized for local development and single-user usage. Jobs are stored in memory, files are written to local disk, and conversions are processed with a small in-memory queue.
 
@@ -24,10 +25,17 @@ The current implementation is optimized for local development and single-user us
 ## Features
 
 - Submit a video or audio URL
+- Inspect a source page that contains many videos
+- Check or uncheck which tracks should be converted
+- Convert selected tracks one by one in a serial queue
+- Show completed, active, queued, and failed items inside the batch
+- Estimate full batch duration from reported media durations
 - Choose output format (`mp3` or `m4a`)
 - Choose target quality (`standard` or `high`)
 - Track conversion progress
 - Preview and download the converted audio
+- Ask for similar music based on a completed track
+- Open a recommendation in source search or resolve it directly into a new download
 - Clear dependency and failure reporting
 - Basic rate limiting on conversion requests
 - YouTube support via the official standalone `yt-dlp` macOS binary
@@ -61,26 +69,33 @@ Note:
 
 - location: `client/`
 - React + Vite single-page app
-- calls `/api/health`, `/api/jobs`, and `/api/jobs/:id`
-- polls job status every 2 seconds while a conversion is active
-- shows dependency readiness, progress, download state, and rate-limit feedback
+- calls `/api/health`, `/api/source`, `/api/jobs`, `/api/jobs/:id`, and `/api/recommendations`
+- polls batch status every 2 seconds while conversions are active
+- shows dependency readiness, source inspection results, serial queue state, recommendation results, and rate-limit feedback
 
 ### Backend
 
 - location: `server/`
 - Express API with TypeScript
 - validates input with `zod`
-- stores jobs in memory
+- stores jobs and recommendation cache in memory
 - enforces a small in-memory concurrency cap
 - cleans up expired output files on an interval
 
 ### Media pipeline
 
-- title probing via `yt-dlp --print`
-- download/extract using `yt-dlp`
+- source inspection via `yt-dlp --flat-playlist`
+- title probing and media extraction using `yt-dlp`
 - audio conversion through `ffmpeg`
 - output files written to `output/`
 - temporary files written to `tmp/`
+
+### Recommendation pipeline
+
+- seed track is inferred from the completed item title
+- MusicBrainz is used to canonicalize title and artist when possible
+- Last.fm is used for similar-track and similar-artist recommendations when `LASTFM_API_KEY` is configured
+- MusicBrainz-only fallback recommendations are returned when Last.fm is not configured
 
 ## API Summary
 
@@ -88,11 +103,16 @@ Note:
 
 Returns dependency readiness and server settings relevant to the frontend.
 
+### `POST /api/source`
+
+Inspects a source URL and returns a flat list of candidate videos/tracks that can be selected for conversion.
+
 ### `POST /api/jobs`
 
-Creates a conversion job from:
+Creates a serial conversion batch from:
 
 - `url`
+- `entries`
 - `format`: `mp3` or `m4a`
 - `quality`: `standard` or `high`
 
@@ -104,7 +124,21 @@ Returns `202` with the created job, or:
 
 ### `GET /api/jobs/:id`
 
-Returns the latest state of a conversion job.
+Returns the latest state of a batch job and all item-level statuses.
+
+### `POST /api/recommendations`
+
+Accepts:
+
+- `title`
+- optional `artist`
+- optional `sourceUrl`
+
+Returns the canonicalized seed track, provider status, and a ranked list of similar tracks.
+
+### `POST /api/recommendations/resolve`
+
+Accepts a recommendation search query and resolves it to a concrete downloadable media source, which the frontend can send straight into the converter.
 
 ### `GET /downloads/:filename`
 
@@ -125,6 +159,8 @@ Serves a completed output file.
    ```
 
    If you installed binaries into user-local locations, update `YT_DLP_PATH` and `FFMPEG_PATH` in `.env` to match your machine.
+   `LASTFM_API_KEY` is optional but recommended for better similar-music suggestions.
+   `MUSICBRAINZ_CONTACT` is optional but recommended so MusicBrainz requests include an identifiable contact string.
 
 3. Start the app:
 
@@ -150,11 +186,13 @@ Backend tests currently cover:
 - valid job creation
 - private-network URL rejection
 - rate limiting
+- recommendation endpoint behavior
 
 Browser verification has also been done manually against the local app, including:
 
 - direct MP3 conversion
-- YouTube conversion
+- serial conversion from a multi-video YouTube page
+- similar-music lookup on a completed download
 - rate-limit UX
 
 ## Operational Notes
@@ -163,6 +201,7 @@ Browser verification has also been done manually against the local app, includin
 - Jobs are not persisted across server restarts.
 - Rate limiting is in-memory and resets on server restart.
 - Cleanup is local-disk based and intended for development/small-scale use.
+- Recommendation caching is in-memory and resets on server restart.
 - YouTube behavior can change over time, so `yt-dlp` may need periodic updates.
 
 ## Privacy And Safety
@@ -182,6 +221,7 @@ Important limitation:
 
 - This is not yet production hardened for multi-user deployment.
 - There is no persistent job database.
+- Recommendation quality depends on provider coverage and metadata quality.
 - Progress is derived from downloader output and is approximate.
 - The frontend currently uses polling, not SSE or WebSockets.
 - Large-scale abuse controls and auth are not implemented.

@@ -276,6 +276,24 @@ export async function inspectSource(url: string): Promise<SourceInspection> {
   };
 }
 
+export async function resolveRecommendationSource(query: string): Promise<SourceEntry> {
+  const result = await runCommand(config.ytDlpPath, [
+    ...buildYtDlpArgs('https://www.youtube.com'),
+    '--dump-single-json',
+    '--no-playlist',
+    `ytsearch1:${query}`,
+  ]);
+
+  const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
+  const entry = toSourceEntry(parsed, 'https://www.youtube.com', 1);
+
+  if (!entry) {
+    throw new Error('No downloadable source could be resolved for this recommendation.');
+  }
+
+  return entry;
+}
+
 function buildTopLevelStage(itemTitle: string, index: number, total: number, stage: string) {
   return `Item ${index}/${total}: ${itemTitle} - ${stage}`;
 }

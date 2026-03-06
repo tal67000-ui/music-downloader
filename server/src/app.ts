@@ -3,10 +3,11 @@ import express, { type Request, type Response } from 'express';
 import path from 'node:path';
 
 import { config } from './config.js';
-import { createJob, getJob, inspectSource, listJobs } from './jobStore.js';
+import { createJob, getJob, inspectSource, listJobs, resolveRecommendationSource } from './jobStore.js';
 import { getDependencyStatus } from './mediaTools.js';
+import { getRecommendations } from './recommendations.js';
 import { consumeRateLimit } from './rateLimit.js';
-import { createJobSchema, inspectSourceSchema } from './validation.js';
+import { createJobSchema, inspectSourceSchema, recommendationSchema, resolveRecommendationSchema } from './validation.js';
 
 async function ensureDependencies(res: Response) {
   const dependencies = await getDependencyStatus();
@@ -78,6 +79,53 @@ export async function handleCreateJob(req: Request, res: Response) {
   res.status(202).json({ job });
 }
 
+export async function handleRecommendations(req: Request, res: Response) {
+  const parsed = recommendationSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    res.status(400).json({
+      error: 'Invalid request',
+      details: parsed.error.flatten(),
+    });
+    return;
+  }
+
+  try {
+    const recommendations = await getRecommendations(parsed.data);
+    res.json(recommendations);
+  } catch (error) {
+    res.status(502).json({
+      error: error instanceof Error ? error.message : 'Unable to fetch recommendations',
+    });
+  }
+}
+
+export async function handleResolveRecommendation(req: Request, res: Response) {
+  const parsed = resolveRecommendationSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    res.status(400).json({
+      error: 'Invalid request',
+      details: parsed.error.flatten(),
+    });
+    return;
+  }
+
+  const dependencies = await ensureDependencies(res);
+  if (!dependencies) {
+    return;
+  }
+
+  try {
+    const source = await resolveRecommendationSource(parsed.data.query);
+    res.json({ source });
+  } catch (error) {
+    res.status(422).json({
+      error: error instanceof Error ? error.message : 'Unable to resolve recommendation source',
+    });
+  }
+}
+
 export function createApp() {
   const clientDistDir = path.resolve(config.rootDir, 'client', 'dist');
   const app = express();
@@ -109,6 +157,8 @@ export function createApp() {
   });
 
   app.post('/api/sources/inspect', handleInspectSource);
+  app.post('/api/recommendations', handleRecommendations);
+  app.post('/api/recommendations/resolve', handleResolveRecommendation);
   app.get('/api/jobs', (_req, res) => {
     res.json({ jobs: listJobs() });
   });

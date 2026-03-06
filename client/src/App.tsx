@@ -1,7 +1,24 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
-import { ApiError, createBatchJob, fetchHealth, fetchJob, inspectSource } from './api';
-import type { HealthResponse, JobRecord, OutputFormat, QualityPreset, SourceEntry, SourceInspection } from './types';
+import {
+  ApiError,
+  createBatchJob,
+  createSingleJob,
+  fetchHealth,
+  fetchJob,
+  fetchRecommendations,
+  inspectSource,
+  resolveRecommendationSource,
+} from './api';
+import type {
+  HealthResponse,
+  JobRecord,
+  OutputFormat,
+  QualityPreset,
+  RecommendationResponse,
+  SourceEntry,
+  SourceInspection,
+} from './types';
 
 const formatLabels: Record<OutputFormat, string> = {
   mp3: 'MP3',
@@ -29,6 +46,18 @@ function formatDuration(seconds?: number) {
   return `${minutes}m ${remainingSeconds}s`;
 }
 
+function parseArtistFromTitle(title: string) {
+  const separators = [' - ', ' – ', ' — '];
+  for (const separator of separators) {
+    const parts = title.split(separator);
+    if (parts.length >= 2) {
+      return parts[0].trim();
+    }
+  }
+
+  return undefined;
+}
+
 export function App() {
   const [url, setUrl] = useState('');
   const [format, setFormat] = useState<OutputFormat>('mp3');
@@ -42,6 +71,11 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [retryAt, setRetryAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [recommendationTargetId, setRecommendationTargetId] = useState<string | null>(null);
+  const [recommendations, setRecommendations] = useState<RecommendationResponse | null>(null);
+  const [recommendationLoading, setRecommendationLoading] = useState(false);
+  const [recommendationError, setRecommendationError] = useState<string | null>(null);
+  const [downloadingRecommendationId, setDownloadingRecommendationId] = useState<string | null>(null);
 
   useEffect(() => {
     void fetchHealth()
@@ -131,6 +165,9 @@ export function App() {
         items: selectedItems,
       });
       setJob(response.job);
+      setRecommendations(null);
+      setRecommendationTargetId(null);
+      setRecommendationError(null);
     } catch (err) {
       setJob(null);
       if (err instanceof ApiError && err.status === 429) {
@@ -142,6 +179,65 @@ export function App() {
     }
   }
 
+  async function onLoadRecommendations(itemId: string) {
+    const item = job?.items.find((entry) => entry.id === itemId);
+    if (!item) {
+      return;
+    }
+
+    setRecommendationTargetId(itemId);
+    setRecommendationLoading(true);
+    setRecommendationError(null);
+
+    try {
+      const response = await fetchRecommendations({
+        title: item.title,
+        artist: parseArtistFromTitle(item.title),
+        sourceUrl: item.url,
+      });
+      setRecommendations(response);
+    } catch (err) {
+      setRecommendations(null);
+      setRecommendationError(err instanceof Error ? err.message : 'Unable to load recommendations');
+    } finally {
+      setRecommendationLoading(false);
+    }
+  }
+
+  async function onDownloadRecommendation(item: RecommendationResponse['recommendations'][number]) {
+    setDownloadingRecommendationId(item.id);
+    setRecommendationError(null);
+    setError(null);
+    setRetryAt(null);
+
+    try {
+      const resolved = await resolveRecommendationSource(item.sourceQuery);
+      const response = await createSingleJob({
+        url: resolved.source.url,
+        format,
+        quality,
+      });
+
+      setJob(response.job);
+      setSource({
+        sourceUrl: resolved.source.url,
+        title: resolved.source.title,
+        kind: 'single',
+        entryCount: 1,
+        entries: [resolved.source],
+        estimatedTotalSeconds: resolved.source.durationSeconds,
+      });
+      setSelectedIds([resolved.source.id]);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 429) {
+        setRetryAt(err.retryAt ?? null);
+      }
+      setRecommendationError(err instanceof Error ? err.message : 'Unable to download recommendation');
+    } finally {
+      setDownloadingRecommendationId(null);
+    }
+  }
+
   const selectedItems = useMemo(
     () => (source ? source.entries.filter((entry) => selectedIds.includes(entry.id)) : []),
     [selectedIds, source],
@@ -149,6 +245,7 @@ export function App() {
   const selectedEstimatedSeconds = selectedItems.reduce((sum, entry) => sum + (entry.durationSeconds ?? 0), 0);
   const retryMessage =
     retryAt !== null ? `Rate limit reached. Try again in ${Math.max(0, Math.ceil((retryAt - now) / 1000))}s.` : null;
+  const recommendationTarget = job?.items.find((item) => item.id === recommendationTargetId) ?? null;
 
   return (
     <main className="page-shell batch-layout">
@@ -339,14 +436,78 @@ export function App() {
                     <div className="mini-progress-bar" style={{ width: `${item.progress}%` }} />
                   </div>
                   {item.downloadPath ? (
-                    <a className="download-link compact-link" href={item.downloadPath} download={item.downloadName}>
-                      Download {item.downloadName}
-                    </a>
+                    <div className="batch-actions">
+                      <a className="download-link compact-link" href={item.downloadPath} download={item.downloadName}>
+                        Download {item.downloadName}
+                      </a>
+                      <button
+                        type="button"
+                        className="ghost-button compact-link"
+                        onClick={() => onLoadRecommendations(item.id)}
+                        disabled={recommendationLoading && recommendationTargetId === item.id}
+                      >
+                        {recommendationLoading && recommendationTargetId === item.id ? 'Finding similar...' : 'Find similar'}
+                      </button>
+                    </div>
                   ) : null}
                   {item.error ? <p className="error-banner compact-banner">{item.error}</p> : null}
                 </article>
               ))}
             </div>
+
+            <section className="recommendation-panel">
+              <div className="source-header">
+                <div>
+                  <h3>Similar music</h3>
+                  <p className="muted">
+                    {recommendationTarget ? `Suggestions based on ${recommendationTarget.title}` : 'Pick a completed track to get recommendations.'}
+                  </p>
+                </div>
+                {recommendations ? (
+                  <div className="selection-summary">
+                    <strong>{recommendations.recommendations.length} suggestions</strong>
+                    <span>
+                      MB {recommendations.providerStatus.musicBrainz} • Last.fm {recommendations.providerStatus.lastfm}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+
+              {recommendationError ? <p className="error-banner compact-banner">{recommendationError}</p> : null}
+
+              {recommendations ? (
+                <div className="recommendation-list">
+                  {recommendations.recommendations.map((item) => (
+                    <article className="recommendation-item" key={item.id}>
+                      <div>
+                        <strong>{item.title}</strong>
+                        <p className="muted">
+                          {item.artist} • {item.reason}
+                        </p>
+                      </div>
+                      <div className="selection-summary">
+                        <strong>{Math.round(item.score * 100)}%</strong>
+                        <div className="recommendation-actions">
+                          <a className="link-chip" href={item.sourceUrl ?? item.url} target="_blank" rel="noreferrer">
+                            {item.sourceLabel ?? 'Open source'}
+                          </a>
+                          <button
+                            type="button"
+                            className="ghost-button compact-link"
+                            onClick={() => onDownloadRecommendation(item)}
+                            disabled={downloadingRecommendationId === item.id || !health?.dependencies.ready}
+                          >
+                            {downloadingRecommendationId === item.id ? 'Resolving...' : 'Download this'}
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">Recommendations will appear here after you ask for similar music on a completed track.</p>
+              )}
+            </section>
           </>
         )}
       </section>

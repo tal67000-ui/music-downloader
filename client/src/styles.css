@@ -250,7 +250,8 @@ button:disabled {
 }
 
 .entry-list,
-.batch-item-list {
+.batch-item-list,
+.recommendation-list {
   display: grid;
   gap: 10px;
 }
@@ -322,10 +323,55 @@ button:disabled {
 .compact-link {
   min-height: 42px;
   font-size: 0.95rem;
+  padding: 0 14px;
 }
 
 .compact-banner {
   margin-bottom: 0;
+}
+
+.batch-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.recommendation-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.recommendation-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.link-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  text-decoration: none;
+  color: #ffd999;
+  background: rgba(255, 194, 92, 0.12);
+}
+
+.recommendation-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 1080px) {
@@ -361,5 +407,12 @@ button:disabled {
 
   .action-row {
     flex-direction: column;
+  }
+
+  .batch-actions,
+  .recommendation-item,
+  .recommendation-actions {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

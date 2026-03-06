@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import httpMocks from 'node-mocks-http';
 import type { Request, Response } from 'express';
 
-import { handleCreateJob, handleInspectSource } from './app.js';
+import { handleCreateJob, handleInspectSource, handleRecommendations, handleResolveRecommendation } from './app.js';
 import { resetRateLimits } from './rateLimit.js';
 
 vi.mock('./mediaTools.js', () => ({
@@ -65,6 +65,39 @@ vi.mock('./jobStore.js', () => ({
   })),
   getJob: vi.fn(() => undefined),
   listJobs: vi.fn(() => []),
+  resolveRecommendationSource: vi.fn(async (query: string) => ({
+    id: 'resolved-one',
+    url: 'https://www.youtube.com/watch?v=resolved',
+    title: `Resolved ${query}`,
+    index: 1,
+    durationSeconds: 210,
+  })),
+}));
+
+vi.mock('./recommendations.js', () => ({
+  getRecommendations: vi.fn(async (input: { title: string; artist?: string }) => ({
+    seed: {
+      title: input.title,
+      artist: input.artist,
+    },
+    recommendations: [
+      {
+        id: 'rec-1',
+        title: 'Similar track',
+        artist: 'Similar artist',
+        score: 0.91,
+        reason: 'Similar track',
+        source: 'lastfm-track',
+        sourceQuery: 'Similar artist - Similar track',
+        sourceUrl: 'https://www.youtube.com/results?search_query=Similar+artist+-+Similar+track',
+        sourceLabel: 'YouTube search',
+      },
+    ],
+    providerStatus: {
+      musicBrainz: 'used',
+      lastfm: 'used',
+    },
+  })),
 }));
 
 describe('app handlers', () => {
@@ -104,6 +137,36 @@ describe('app handlers', () => {
     return res;
   }
 
+  async function sendRecommendations(payload: unknown) {
+    const req = httpMocks.createRequest<Request>({
+      method: 'POST',
+      url: '/api/recommendations',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: payload as Record<string, unknown>,
+    });
+    const res = httpMocks.createResponse<Response>();
+    await handleRecommendations(req, res);
+
+    return res;
+  }
+
+  async function sendRecommendationResolve(payload: unknown) {
+    const req = httpMocks.createRequest<Request>({
+      method: 'POST',
+      url: '/api/recommendations/resolve',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: payload as Record<string, unknown>,
+    });
+    const res = httpMocks.createResponse<Response>();
+    await handleResolveRecommendation(req, res);
+
+    return res;
+  }
+
   it('inspects a list source', async () => {
     const response = await sendInspect({
       url: 'https://www.youtube.com/@Revealedrec/videos',
@@ -135,6 +198,24 @@ describe('app handlers', () => {
     expect(response.statusCode).toBe(202);
     expect(response._getJSONData().job.id).toBe('job-123');
     expect(response.getHeader('X-RateLimit-Remaining')).toBe('4');
+  });
+
+  it('returns recommendations for a completed track', async () => {
+    const response = await sendRecommendations({
+      title: 'Kura & DJ TORA - Pounding Kick',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response._getJSONData().recommendations).toHaveLength(1);
+  });
+
+  it('resolves a recommendation to a downloadable source', async () => {
+    const response = await sendRecommendationResolve({
+      query: 'Similar artist - Similar track',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response._getJSONData().source.url).toContain('youtube.com/watch');
   });
 
   it('rejects private network URLs', async () => {
