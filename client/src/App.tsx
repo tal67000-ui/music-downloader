@@ -20,6 +20,8 @@ import type {
   SourceInspection,
 } from './types';
 
+type LengthPreset = 'all' | 'singles' | 'medium' | 'long';
+
 const formatLabels: Record<OutputFormat, string> = {
   mp3: 'MP3',
   m4a: 'M4A',
@@ -29,6 +31,70 @@ const qualityLabels: Record<QualityPreset, string> = {
   standard: 'Standard',
   high: 'High',
 };
+
+const bitrateMap: Record<QualityPreset, Record<OutputFormat, number>> = {
+  standard: {
+    mp3: 192,
+    m4a: 160,
+  },
+  high: {
+    mp3: 320,
+    m4a: 256,
+  },
+};
+
+function estimateSizeMb(durationSeconds: number | undefined, format: OutputFormat, quality: QualityPreset) {
+  if (!durationSeconds || durationSeconds <= 0) {
+    return undefined;
+  }
+
+  const bitrateKbps = bitrateMap[quality][format];
+  return (durationSeconds * bitrateKbps) / 8 / 1024;
+}
+
+function formatSizeMb(sizeMb: number | undefined) {
+  if (!sizeMb || sizeMb <= 0) {
+    return 'Unknown size';
+  }
+
+  if (sizeMb >= 1024) {
+    return `~${(sizeMb / 1024).toFixed(2)} GB`;
+  }
+
+  return `~${sizeMb < 10 ? sizeMb.toFixed(1) : Math.round(sizeMb)} MB`;
+}
+
+function classifyEntry(durationSeconds?: number) {
+  if (!durationSeconds || durationSeconds <= 0) {
+    return 'Unknown';
+  }
+
+  if (durationSeconds < 12 * 60) {
+    return 'Track';
+  }
+
+  if (durationSeconds <= 30 * 60) {
+    return 'Medium mix';
+  }
+
+  return 'Long set';
+}
+
+function matchesPreset(durationSeconds: number | undefined, preset: LengthPreset) {
+  if (preset === 'all' || !durationSeconds || durationSeconds <= 0) {
+    return preset === 'all';
+  }
+
+  if (preset === 'singles') {
+    return durationSeconds < 12 * 60;
+  }
+
+  if (preset === 'medium') {
+    return durationSeconds >= 12 * 60 && durationSeconds <= 30 * 60;
+  }
+
+  return durationSeconds > 30 * 60;
+}
 
 function formatDuration(seconds?: number) {
   if (!seconds || seconds <= 0) {
@@ -76,6 +142,8 @@ export function App() {
   const [recommendationLoading, setRecommendationLoading] = useState(false);
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
   const [downloadingRecommendationId, setDownloadingRecommendationId] = useState<string | null>(null);
+  const [lengthPreset, setLengthPreset] = useState<LengthPreset>('all');
+  const [maxSizeMb, setMaxSizeMb] = useState<string>('');
 
   useEffect(() => {
     void fetchHealth()
@@ -133,6 +201,8 @@ export function App() {
       const response = await inspectSource(url);
       setSource(response.source);
       setSelectedIds(response.source.entries.map((entry) => entry.id));
+      setLengthPreset('all');
+      setMaxSizeMb('');
     } catch (err) {
       setSource(null);
       setSelectedIds([]);
@@ -238,112 +308,250 @@ export function App() {
     }
   }
 
+  function applyVisibleSelection(mode: 'select' | 'clear') {
+    if (!source) {
+      return;
+    }
+
+    const visibleIds = visibleEntries.map((entry) => entry.id);
+    setSelectedIds((current) => {
+      if (mode === 'select') {
+        return Array.from(new Set([...current, ...visibleIds]));
+      }
+
+      return current.filter((id) => !visibleIds.includes(id));
+    });
+  }
+
   const selectedItems = useMemo(
     () => (source ? source.entries.filter((entry) => selectedIds.includes(entry.id)) : []),
     [selectedIds, source],
   );
+  const maxSizeFilter = Number(maxSizeMb);
+  const visibleEntries = useMemo(() => {
+    if (!source) {
+      return [];
+    }
+
+    return source.entries.filter((entry) => {
+      const sizeMb = estimateSizeMb(entry.durationSeconds, format, quality);
+      const matchesSize = !maxSizeMb || (Number.isFinite(maxSizeFilter) && sizeMb !== undefined && sizeMb <= maxSizeFilter);
+      return matchesPreset(entry.durationSeconds, lengthPreset) && matchesSize;
+    });
+  }, [source, format, quality, lengthPreset, maxSizeMb, maxSizeFilter]);
+  const visibleIds = visibleEntries.map((entry) => entry.id);
+  const visibleSelectedCount = visibleEntries.filter((entry) => selectedIds.includes(entry.id)).length;
   const selectedEstimatedSeconds = selectedItems.reduce((sum, entry) => sum + (entry.durationSeconds ?? 0), 0);
+  const selectedEstimatedSizeMb = selectedItems.reduce(
+    (sum, entry) => sum + (estimateSizeMb(entry.durationSeconds, format, quality) ?? 0),
+    0,
+  );
   const retryMessage =
     retryAt !== null ? `Rate limit reached. Try again in ${Math.max(0, Math.ceil((retryAt - now) / 1000))}s.` : null;
   const recommendationTarget = job?.items.find((item) => item.id === recommendationTargetId) ?? null;
+  const activeItem = job?.items.find((item) => item.id === job.currentItemId) ?? null;
+  const selectedSummaryLabel =
+    selectedItems.length > 0 ? `${selectedItems.length} selected` : source ? 'Choose videos to convert' : 'Analyze a URL first';
+  const showRecommendations =
+    Boolean(recommendations) ||
+    Boolean(recommendationError) ||
+    Boolean(job?.items.some((item) => item.status === 'completed' && item.downloadPath));
+  const convertButtonLabel =
+    format === 'mp3'
+      ? selectedItems.length > 0
+        ? `Convert ${selectedItems.length} ${selectedItems.length === 1 ? 'track' : 'tracks'} to MP3`
+        : 'Convert to MP3'
+      : selectedItems.length > 0
+        ? `Convert ${selectedItems.length} ${selectedItems.length === 1 ? 'track' : 'tracks'} to M4A`
+        : 'Convert to M4A';
 
   return (
-    <main className="page-shell batch-layout">
-      <section className="hero-card">
-        <div className="eyebrow">Serial downloader for playlists, channels, and source pages</div>
-        <h1>Load a video list, choose tracks, then convert them one by one.</h1>
-        <p className="lede">
-          Paste a source page like a YouTube channel, playlist, or any supported multi-video feed. The app will list the
-          available tracks, let you choose what to keep, and then run the conversions in sequence.
-        </p>
-        <p className="install-hint">
-          Tip: after you open this through your shared private URL, install it from your browser menu to get a desktop or home-screen icon.
-        </p>
+    <main className="app-shell">
+      <section className="hero-card surface-card">
+        <div className="hero-copy">
+          <span className="eyebrow">Video to audio converter</span>
+          <h1>Convert videos to audio in seconds</h1>
+          <p className="lede">
+            Paste a video, playlist, or channel URL. Preview what was found, choose format and quality, then convert and
+            download clean audio files.
+          </p>
+        </div>
 
-        <form className="converter-form" onSubmit={onInspect}>
-          <label className="field">
-            <span>Source URL</span>
-            <input
-              type="url"
-              placeholder="https://www.youtube.com/@Revealedrec/videos"
-              value={url}
-              onChange={(event) => setUrl(event.target.value)}
-              required
-            />
-          </label>
-
-          <div className="field-row">
-            <label className="field">
-              <span>Format</span>
-              <select value={format} onChange={(event) => setFormat(event.target.value as OutputFormat)}>
-                <option value="mp3">MP3</option>
-                <option value="m4a">M4A</option>
-              </select>
+        <form className="hero-form" onSubmit={onInspect}>
+          <div className="hero-input-row">
+            <label className="field hero-url-field">
+              <span>Paste video or playlist URL</span>
+              <input
+                type="url"
+                placeholder="https://www.youtube.com/watch?v=..."
+                value={url}
+                onChange={(event) => setUrl(event.target.value)}
+                required
+              />
             </label>
 
-            <label className="field">
-              <span>Quality</span>
-              <select value={quality} onChange={(event) => setQuality(event.target.value as QualityPreset)}>
-                <option value="standard">Standard</option>
-                <option value="high">High</option>
-              </select>
-            </label>
+            <button className="submit-button hero-action" type="submit" disabled={loadingInspect || !health?.dependencies.ready}>
+              {loadingInspect ? 'Loading...' : 'Analyze'}
+            </button>
           </div>
 
-          <div className="action-row">
-            <button className="submit-button" type="submit" disabled={loadingInspect || !health?.dependencies.ready}>
-              {loadingInspect ? 'Loading video list...' : 'Load video list'}
-            </button>
+          <div className="settings-row">
+            <div className="settings-block">
+              <span className="meta-label">Output format</span>
+              <div className="option-group">
+                {(['mp3', 'm4a'] as OutputFormat[]).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={`option-button ${format === option ? 'is-active' : ''}`}
+                    onClick={() => setFormat(option)}
+                  >
+                    <strong>{formatLabels[option]}</strong>
+                    <span>{option === 'mp3' ? 'Most compatible' : 'Smaller files'}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="settings-block">
+              <span className="meta-label">Audio quality</span>
+              <div className="option-group">
+                {(['high', 'standard'] as QualityPreset[]).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={`option-button ${quality === option ? 'is-active' : ''}`}
+                    onClick={() => setQuality(option)}
+                  >
+                    <strong>{quality === option ? qualityLabels[option] : qualityLabels[option]}</strong>
+                    <span>{formatQualityCopy(option, format)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="hero-footer">
+            <LivePill ready={Boolean(health?.dependencies.ready)} />
             <button
-              className="secondary-button"
+              className="submit-button primary-convert-button"
               type="button"
               onClick={onStartConversion}
               disabled={loadingStart || !health?.dependencies.ready || selectedItems.length === 0}
             >
-              {loadingStart ? 'Starting serial conversion...' : 'Start conversion'}
+              {loadingStart ? 'Starting conversion...' : convertButtonLabel}
             </button>
           </div>
         </form>
 
-        <div className="status-grid">
-          <StatusPanel health={health} />
-          <QualityPanel format={format} quality={quality} />
+        {retryMessage ? <p className="warning-banner">{retryMessage}</p> : null}
+        {error ? <p className="error-banner">{error}</p> : null}
+      </section>
+
+      {source ? (
+        <section className="summary-grid">
+          <MetricCard
+            label={source.kind === 'list' ? 'Playlist detected' : 'Video detected'}
+            value={source.kind === 'list' ? 'Multiple videos found' : 'Single video ready'}
+            detail={source.title}
+          />
+          <MetricCard label="Videos found" value={`${source.entryCount}`} detail={selectedSummaryLabel} />
+          <MetricCard
+            label="Total audio duration"
+            value={formatDuration(source.estimatedTotalSeconds)}
+            detail="Based on the videos found in this source."
+          />
+          <MetricCard
+            label="Estimated file size"
+            value={selectedItems.length > 0 ? formatSizeMb(selectedEstimatedSizeMb) : 'Choose videos first'}
+            detail={selectedItems.length > 0 ? `For ${selectedItems.length} selected item${selectedItems.length === 1 ? '' : 's'}` : 'Shown for the videos you keep.'}
+          />
+        </section>
+      ) : null}
+
+      <section className="surface-card preview-card">
+        <div className="section-heading">
+          <div>
+            <span className="section-kicker">Preview</span>
+            <h2>Preview your videos</h2>
+            <p className="muted">
+              {source ? 'Choose the videos you want to convert.' : 'Analyze a URL to see the videos, duration, and estimated output before converting.'}
+            </p>
+          </div>
+          {source ? (
+            <div className="selection-summary">
+              <strong>{selectedItems.length}</strong>
+              <span>selected for conversion</span>
+            </div>
+          ) : null}
         </div>
 
         {source ? (
-          <section className="source-panel">
-            <div className="source-header">
-              <div>
-                <h2>{source.title}</h2>
-                <p className="muted">
-                  {source.entryCount} item{source.entryCount === 1 ? '' : 's'} detected
-                </p>
+          <>
+            <div className="preview-toolbar">
+              <div className="selection-actions">
+                <button type="button" className="ghost-button" onClick={() => setSelectedIds(source.entries.map((entry) => entry.id))}>
+                  Select all
+                </button>
+                <button type="button" className="ghost-button" onClick={() => setSelectedIds([])}>
+                  Clear all
+                </button>
+                <button type="button" className="ghost-button" onClick={() => applyVisibleSelection('select')}>
+                  Select visible
+                </button>
+                <button type="button" className="ghost-button" onClick={() => applyVisibleSelection('clear')}>
+                  Clear visible
+                </button>
               </div>
-              <div className="selection-summary">
-                <strong>{selectedItems.length} selected</strong>
-                <span>{selectedEstimatedSeconds > 0 ? formatDuration(selectedEstimatedSeconds) : 'No time estimate yet'}</span>
+
+              <div className="preview-filters">
+                <div className="preset-group" role="tablist" aria-label="Video length filters">
+                  {([
+                    ['all', 'All'],
+                    ['singles', 'Singles'],
+                    ['medium', 'Medium'],
+                    ['long', 'Long'],
+                  ] as Array<[LengthPreset, string]>).map(([preset, label]) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      className={`ghost-button filter-chip ${lengthPreset === preset ? 'is-active' : ''}`}
+                      onClick={() => setLengthPreset(preset)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <label className="field compact-field preview-size-field">
+                  <span>Max size (MB)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
+                    placeholder="Any size"
+                    value={maxSizeMb}
+                    onChange={(event) => setMaxSizeMb(event.target.value)}
+                  />
+                </label>
               </div>
             </div>
 
-            <div className="selection-actions">
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => setSelectedIds(source.entries.map((entry) => entry.id))}
-              >
-                Select all
-              </button>
-              <button type="button" className="ghost-button" onClick={() => setSelectedIds([])}>
-                Clear all
-              </button>
+            <div className="selection-strip">
+              <span>{visibleEntries.length} videos shown</span>
+              <span>{visibleSelectedCount} selected</span>
+              <span>{selectedEstimatedSeconds > 0 ? formatDuration(selectedEstimatedSeconds) : 'No duration yet'}</span>
             </div>
 
-            <div className="entry-list">
-              {source.entries.map((entry) => {
+            <div className="preview-list">
+              {visibleEntries.map((entry) => {
                 const checked = selectedIds.includes(entry.id);
                 const liveItem = job?.items.find((item) => item.id === entry.id);
+                const sizeLabel = formatSizeMb(estimateSizeMb(entry.durationSeconds, format, quality));
+
                 return (
-                  <label className={`entry-row ${checked ? 'is-selected' : ''}`} key={entry.id}>
+                  <label className={`preview-item ${checked ? 'is-selected' : ''}`} key={entry.id}>
                     <input
                       type="checkbox"
                       checked={checked}
@@ -353,95 +561,84 @@ export function App() {
                         )
                       }
                     />
-                    <div className="entry-copy">
+                    <PreviewArtwork entry={entry} />
+                    <div className="preview-copy">
                       <strong>{entry.title}</strong>
-                      <span className="muted">
-                        #{entry.index} • {formatDuration(entry.durationSeconds)}
-                      </span>
+                      <span className="muted">{formatDuration(entry.durationSeconds)}</span>
                     </div>
-                    {liveItem ? <span className={`item-pill ${liveItem.status}`}>{liveItem.status}</span> : null}
+                    <div className="preview-meta">
+                      <span>{sizeLabel}</span>
+                      {liveItem ? <span className={`item-pill ${liveItem.status}`}>{statusLabel(liveItem.status)}</span> : null}
+                    </div>
                   </label>
                 );
               })}
             </div>
-          </section>
-        ) : null}
-
-        {retryMessage ? <p className="warning-banner">{retryMessage}</p> : null}
-        {error ? <p className="error-banner">{error}</p> : null}
+            {visibleEntries.length === 0 ? <p className="muted">No videos match the current filters.</p> : null}
+          </>
+        ) : (
+          <EmptyBlock
+            title="Your preview will appear here"
+            copy="Paste a video, playlist, or channel URL above and you’ll be able to choose exactly what gets converted."
+          />
+        )}
       </section>
 
-      <section className="result-card">
-        <h2>Serial conversion run</h2>
+      <section className="surface-card progress-section">
+        <div className="section-heading">
+          <div>
+            <span className="section-kicker">Progress</span>
+            <h2>Conversion progress</h2>
+            <p className="muted">
+              {job ? 'Track what is converting, what is complete, and what is ready to download.' : 'Once you start a conversion, finished files and progress updates will show here.'}
+            </p>
+          </div>
+          {job ? <span className={`item-pill ${job.status}`}>{statusLabel(job.status)}</span> : null}
+        </div>
+
         {!job ? (
-          <p className="muted">Inspect a source, choose the tracks you want, then start the serial conversion.</p>
+          <EmptyBlock
+            title="No downloads yet"
+            copy="Choose your videos, confirm the output settings, and start the conversion to see download progress here."
+          />
         ) : (
           <>
-            <div className="job-meta">
-              <div>
-                <span className="meta-label">Status</span>
-                <strong>{job.status}</strong>
+            <div className="progress-overview">
+              <MetricInline label="Completed" value={`${job.completedCount}/${job.itemCount}`} />
+              <MetricInline label="Failed items" value={`${job.failedCount}`} />
+              <MetricInline label="Time left" value={formatDuration(job.estimatedRemainingSeconds)} />
+              <MetricInline label="Output format" value={formatLabels[job.format]} />
+            </div>
+
+            <div className="progress-card">
+              <div className="progress-copy">
+                <strong>{activeItem ? activeItem.title : 'Preparing your files'}</strong>
+                <span>{Math.round(job.progress)}% complete</span>
               </div>
-              <div>
-                <span className="meta-label">Completed</span>
-                <strong>
-                  {job.completedCount}/{job.itemCount}
-                </strong>
-              </div>
-              <div>
-                <span className="meta-label">Failures</span>
-                <strong>{job.failedCount}</strong>
+              <div className="progress-track" aria-hidden="true">
+                <div className="progress-bar" style={{ width: `${job.progress}%` }} />
               </div>
             </div>
 
-            <div className="progress-track" aria-hidden="true">
-              <div className="progress-bar" style={{ width: `${job.progress}%` }} />
-            </div>
-
-            <dl className="details-list">
-              <div>
-                <dt>Current stage</dt>
-                <dd>{job.stage}</dd>
-              </div>
-              <div>
-                <dt>Source</dt>
-                <dd>{job.sourceUrl}</dd>
-              </div>
-              <div>
-                <dt>Output profile</dt>
-                <dd>
-                  {formatLabels[job.format]} / {qualityLabels[job.quality]}
-                </dd>
-              </div>
-              <div>
-                <dt>Estimated total</dt>
-                <dd>{formatDuration(job.estimatedTotalSeconds)}</dd>
-              </div>
-              <div>
-                <dt>Estimated remaining</dt>
-                <dd>{formatDuration(job.estimatedRemainingSeconds)}</dd>
-              </div>
-            </dl>
-
-            <div className="batch-item-list">
+            <div className="progress-list">
               {job.items.map((item) => (
-                <article className={`batch-item ${job.currentItemId === item.id ? 'is-live' : ''}`} key={item.id}>
-                  <div className="batch-item-top">
+                <article className={`progress-item ${job.currentItemId === item.id ? 'is-live' : ''}`} key={item.id}>
+                  <div className="progress-item-head">
                     <div>
                       <strong>{item.title}</strong>
-                      <p className="muted">
-                        #{item.index} • {item.stage}
-                      </p>
+                      <p className="muted">{formatDuration(item.durationSeconds)}</p>
                     </div>
-                    <span className={`item-pill ${item.status}`}>{item.status}</span>
+                    <span className={`item-pill ${item.status}`}>{statusLabel(item.status)}</span>
                   </div>
+
                   <div className="mini-progress">
                     <div className="mini-progress-bar" style={{ width: `${item.progress}%` }} />
                   </div>
+
                   {item.downloadPath ? (
-                    <div className="batch-actions">
+                    <div className="progress-item-actions">
                       <a className="download-link compact-link" href={item.downloadPath} download={item.downloadName}>
-                        Download {item.downloadName}
+                        Download file
                       </a>
                       <button
                         type="button"
@@ -449,120 +646,132 @@ export function App() {
                         onClick={() => onLoadRecommendations(item.id)}
                         disabled={recommendationLoading && recommendationTargetId === item.id}
                       >
-                        {recommendationLoading && recommendationTargetId === item.id ? 'Finding similar...' : 'Find similar'}
+                        {recommendationLoading && recommendationTargetId === item.id ? 'Loading similar tracks...' : 'Find similar'}
                       </button>
                     </div>
                   ) : null}
+
                   {item.error ? <p className="error-banner compact-banner">{item.error}</p> : null}
                 </article>
               ))}
             </div>
-
-            <section className="recommendation-panel">
-              <div className="source-header">
-                <div>
-                  <h3>Similar music</h3>
-                  <p className="muted">
-                    {recommendationTarget ? `Suggestions based on ${recommendationTarget.title}` : 'Pick a completed track to get recommendations.'}
-                  </p>
-                </div>
-                {recommendations ? (
-                  <div className="selection-summary">
-                    <strong>{recommendations.recommendations.length} suggestions</strong>
-                    <span>
-                      MB {recommendations.providerStatus.musicBrainz} • Last.fm {recommendations.providerStatus.lastfm}
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-
-              {recommendationError ? <p className="error-banner compact-banner">{recommendationError}</p> : null}
-
-              {recommendations ? (
-                <div className="recommendation-list">
-                  {recommendations.recommendations.map((item) => (
-                    <article className="recommendation-item" key={item.id}>
-                      <div>
-                        <strong>{item.title}</strong>
-                        <p className="muted">
-                          {item.artist} • {item.reason}
-                        </p>
-                      </div>
-                      <div className="selection-summary">
-                        <strong>{Math.round(item.score * 100)}%</strong>
-                        <div className="recommendation-actions">
-                          <a className="link-chip" href={item.sourceUrl ?? item.url} target="_blank" rel="noreferrer">
-                            {item.sourceLabel ?? 'Open source'}
-                          </a>
-                          <button
-                            type="button"
-                            className="ghost-button compact-link"
-                            onClick={() => onDownloadRecommendation(item)}
-                            disabled={downloadingRecommendationId === item.id || !health?.dependencies.ready}
-                          >
-                            {downloadingRecommendationId === item.id ? 'Resolving...' : 'Download this'}
-                          </button>
-                        </div>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <p className="muted">Recommendations will appear here after you ask for similar music on a completed track.</p>
-              )}
-            </section>
           </>
         )}
       </section>
+
+      {showRecommendations ? (
+        <section className="surface-card recommendation-section">
+          <div className="section-heading">
+            <div>
+              <span className="section-kicker">More like this</span>
+              <h2>Similar tracks</h2>
+              <p className="muted">
+                {recommendationTarget ? `Based on ${recommendationTarget.title}` : 'Use completed downloads to find similar music.'}
+              </p>
+            </div>
+          </div>
+
+          {recommendationError ? <p className="error-banner compact-banner">{recommendationError}</p> : null}
+
+          {recommendations ? (
+            <div className="recommendation-list">
+              {recommendations.recommendations.map((item) => (
+                <article className="recommendation-item" key={item.id}>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p className="muted">
+                      {item.artist} • {item.reason}
+                    </p>
+                  </div>
+                  <div className="recommendation-actions">
+                    <a className="link-chip" href={item.sourceUrl ?? item.url} target="_blank" rel="noreferrer">
+                      {item.sourceLabel ?? 'Open source'}
+                    </a>
+                    <button
+                      type="button"
+                      className="ghost-button compact-link"
+                      onClick={() => onDownloadRecommendation(item)}
+                      disabled={downloadingRecommendationId === item.id || !health?.dependencies.ready}
+                    >
+                      {downloadingRecommendationId === item.id ? 'Loading...' : 'Convert this track'}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <EmptyBlock
+              title="No similar tracks yet"
+              copy="After a download finishes, use Find similar to bring in a few related tracks."
+            />
+          )}
+        </section>
+      ) : null}
     </main>
   );
 }
 
-function StatusPanel({ health }: { health: HealthResponse | null }) {
-  if (!health) {
-    return (
-      <div className="panel">
-        <h3>System status</h3>
-        <p className="muted">Checking dependencies...</p>
-      </div>
-    );
-  }
-
+function MetricCard({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
-    <div className="panel">
-      <h3>System status</h3>
-      <ul className="status-list">
-        <li>{health.dependencies.ffmpegInstalled ? 'ffmpeg ready' : 'ffmpeg missing'}</li>
-        <li>{health.dependencies.ytDlpInstalled ? 'yt-dlp ready' : 'yt-dlp missing'}</li>
-        <li>{health.dependencies.ready ? 'Serial conversions enabled' : 'Install dependencies to enable conversions'}</li>
-      </ul>
+    <article className="metric-card">
+      <span className="meta-label">{label}</span>
+      <strong>{value}</strong>
+      <p>{detail}</p>
+    </article>
+  );
+}
+
+function MetricInline({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="metric-inline">
+      <span className="meta-label">{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
 
-function QualityPanel({
-  format,
-  quality,
-}: {
-  format: OutputFormat;
-  quality: QualityPreset;
-}) {
-  const description =
-    format === 'mp3'
-      ? quality === 'high'
-        ? 'Sequentially exports selected videos as MP3 at up to 320 kbps.'
-        : 'Sequentially exports selected videos as MP3 at 192 kbps.'
-      : quality === 'high'
-        ? 'Sequentially exports selected videos as AAC/M4A at up to 256 kbps.'
-        : 'Sequentially exports selected videos as AAC/M4A at 160 kbps.';
+function LivePill({ ready }: { ready: boolean }) {
+  return <div className={`live-pill ${ready ? 'is-ready' : 'is-blocked'}`}>{ready ? 'Ready to convert' : 'Converter setup required'}</div>;
+}
 
+function EmptyBlock({ title, copy }: { title: string; copy: string }) {
   return (
-    <div className="panel">
-      <h3>Selected output</h3>
-      <p>
-        {formatLabels[format]} / {qualityLabels[quality]}
-      </p>
-      <p className="muted">{description}</p>
+    <div className="empty-block">
+      <span className="empty-badge">Waiting</span>
+      <strong>{title}</strong>
+      <p className="muted">{copy}</p>
     </div>
   );
+}
+
+function PreviewArtwork({ entry }: { entry: SourceEntry }) {
+  return (
+    <div className="preview-artwork" aria-hidden="true">
+      <span>{entry.title.trim().charAt(0).toUpperCase() || 'A'}</span>
+    </div>
+  );
+}
+
+function formatQualityCopy(quality: QualityPreset, format: OutputFormat) {
+  if (format === 'mp3') {
+    return quality === 'high' ? 'Up to 320 kbps' : '192 kbps';
+  }
+
+  return quality === 'high' ? 'Up to 256 kbps' : '160 kbps';
+}
+
+function statusLabel(status: JobRecord['status'] | JobRecord['items'][number]['status']) {
+  if (status === 'completed') {
+    return 'Complete';
+  }
+
+  if (status === 'running') {
+    return 'Converting';
+  }
+
+  if (status === 'failed') {
+    return 'Failed';
+  }
+
+  return 'Waiting';
 }
