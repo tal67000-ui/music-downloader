@@ -1,17 +1,20 @@
 # Music Downloader
 
-Web app that accepts a media URL, extracts the best available audio, and returns a downloadable audio file for listening.
+Local-first browser workspace for converting remote media into audio files, managing a persistent local track library, building simple mix projects, and finding similar music.
 
 ## Project Summary
 
-This project turns a pasted media URL into downloadable audio files with a fast browser flow:
+This project turns a pasted media URL into downloadable audio files with a desktop-style browser workflow:
 
-- frontend form for source inspection, selection, and quality selection
+- workspace-based frontend with `Convert`, `Library`, `Mix`, and `Similar`
+- source inspection, dense candidate selection, and queue monitoring
+- persistent local library with uploads, playback, and bulk actions
+- mix project creation, transition editing, and preview rendering
 - backend batch job creation and polling
 - `yt-dlp` download/extraction pipeline
 - `ffmpeg` audio transcoding
 - serial conversion queue
-- output preview, download, and similar-music suggestions
+- download, preview, and similar-music suggestions
 
 The current implementation is optimized for local development and single-user usage. Jobs are stored in memory, files are written to local disk, and conversions are processed with a small in-memory queue.
 
@@ -24,20 +27,16 @@ The current implementation is optimized for local development and single-user us
 
 ## Features
 
-- Submit a video or audio URL
-- Inspect a source page that contains many videos
-- Check or uncheck which tracks should be converted
-- Convert selected tracks one by one in a serial queue
-- Show completed, active, queued, and failed items inside the batch
-- Estimate full batch duration from reported media durations
-- Choose output format (`mp3` or `m4a`)
-- Choose target quality (`standard` or `high`)
-- Track conversion progress
-- Preview and download the converted audio
-- Ask for similar music based on a completed track
-- Open a recommendation in source search or resolve it directly into a new download
-- Clear dependency and failure reporting
-- Basic rate limiting on conversion requests
+- `Convert` workspace with URL intake, source inspection, duration/size filters, and serial batch conversion
+- right-side queue/progress inspector with downloads and similar-track lookup
+- `Library` workspace with persistent local tracks, concise controls, download-first bulk actions, per-row downloads, search, sort, filter, and add-to-mix
+- `Mix` workspace with mix projects, ordered sequence editing, explicit transition blocks, crossfade controls, and preview rendering/playback
+- `Similar` workspace with seed-track selection and recommendation-to-convert flow
+- output format selection (`mp3` or `m4a`)
+- quality selection (`standard` or `high`)
+- approximate conversion progress and item-level status
+- clear dependency and failure reporting
+- basic rate limiting on conversion requests
 - YouTube support via the official standalone `yt-dlp` macOS binary
 
 ## Requirements
@@ -68,10 +67,12 @@ Note:
 ### Frontend
 
 - location: `client/`
-- React + Vite single-page app
-- calls `/api/health`, `/api/source`, `/api/jobs`, `/api/jobs/:id`, and `/api/recommendations`
+- React + Vite workspace-style app
+- top-level workspaces: `Convert`, `Library`, `Mix`, `Similar`
+- calls `/api/health`, `/api/sources/inspect`, `/api/jobs`, `/api/jobs/:id`, `/api/library`, `/api/mixes`, and `/api/recommendations`
 - polls batch status every 2 seconds while conversions are active
-- shows dependency readiness, source inspection results, serial queue state, recommendation results, and rate-limit feedback
+- keeps dense list views and shared bulk action patterns across convert candidates, progress rows, library rows, and mix projects
+- uses a restrained desktop-tool UI with concise copy and download-first library actions
 
 ### Backend
 
@@ -103,7 +104,7 @@ Note:
 
 Returns dependency readiness and server settings relevant to the frontend.
 
-### `POST /api/source`
+### `POST /api/sources/inspect`
 
 Inspects a source URL and returns a flat list of candidate videos/tracks that can be selected for conversion.
 
@@ -121,6 +122,46 @@ Returns `202` with the created job, or:
 - `400` for invalid input
 - `429` when rate limited
 - `503` when required binaries are missing
+
+### `GET /api/library`
+
+Returns locally stored library tracks from downloads, uploads, and imports.
+
+### `POST /api/library/upload`
+
+Uploads local audio files into the persistent library.
+
+### `POST /api/library/import-existing`
+
+Scans existing downloaded files and imports them into the library index.
+
+### `DELETE /api/library`
+
+Deletes selected library tracks.
+
+### `GET /api/mixes`
+
+Returns mix projects and their computed timelines.
+
+### `POST /api/mixes`
+
+Creates a new mix project.
+
+### `POST /api/mixes/:id/tracks`
+
+Adds a library track to the selected mix project.
+
+### `PATCH /api/mixes/:id/tracks/:trackId`
+
+Updates a mix track overlap/crossfade value.
+
+### `DELETE /api/mixes/:id`
+
+Deletes a mix project.
+
+### `POST /api/mixes/:id/preview`
+
+Renders an audio preview for the selected mix project.
 
 ### `GET /api/jobs/:id`
 
@@ -168,7 +209,7 @@ Serves a completed output file.
    npm run dev
    ```
 
-4. Open the frontend at `http://localhost:5173`.
+4. Open the frontend at `http://127.0.0.1:5173`.
 
 ## Private Sharing
 
@@ -203,6 +244,7 @@ Browser verification has also been done manually against the local app, includin
 
 - direct MP3 conversion
 - serial conversion from a multi-video YouTube page
+- local library browsing and playback
 - similar-music lookup on a completed download
 - rate-limit UX
 
@@ -232,6 +274,7 @@ Important limitation:
 
 - This is not yet production hardened for multi-user deployment.
 - There is no persistent job database.
+- Mix projects and library state are local-first and intended for single-machine use.
 - Recommendation quality depends on provider coverage and metadata quality.
 - Progress is derived from downloader output and is approximate.
 - The frontend currently uses polling, not SSE or WebSockets.

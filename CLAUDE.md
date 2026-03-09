@@ -2,7 +2,7 @@
 
 ## What This Repo Is
 
-This is a local-first web app that converts remote media into audio downloads and suggests similar music from completed tracks.
+This is a local-first web app that converts remote media into audio downloads, stores them in a persistent local library, supports simple mix building, and suggests similar music from completed tracks.
 
 Primary user flow:
 
@@ -11,7 +11,7 @@ Primary user flow:
 3. User selects tracks and chooses `mp3` or `m4a` plus a quality preset.
 4. Backend creates a serial batch job and runs `yt-dlp` + `ffmpeg` one item at a time.
 5. Frontend polls the batch until completion.
-6. User previews/downloads finished audio files and can request similar music recommendations.
+6. User previews/downloads finished audio files, manages them in the local library, can add them to mix projects, and can request similar music recommendations.
 
 ## Tech Stack
 
@@ -55,7 +55,7 @@ This means restarts clear active job state and rate-limit buckets.
 - `server/src/validation.ts`
   Request validation for source inspection, batch creation, recommendations, and private/local network URL blocking.
 - `client/src/App.tsx`
-  Main UI for source selection, serial conversions, polling, recommendation lookup, and rate-limit UX.
+  Main workspace UI for Convert, Library, Mix, and Similar flows.
 - `.env`
   Local runtime configuration, including binary paths and optional recommendation provider keys.
 
@@ -106,15 +106,25 @@ npm --workspace server run test
 
 ## Current Features
 
+- workspace tabs for `Convert`, `Library`, `Mix`, and `Similar`
 - URL submission for media conversion
 - source inspection for multi-video pages
 - check/uncheck selection before conversion
+- duration and estimated-size filtering on candidates
 - serial batch conversion
 - `mp3` and `m4a` output
 - `standard` and `high` quality presets
 - job polling
 - approximate live progress parsing
-- preview/download UI
+- persistent local track library
+- local uploads and import-existing flow
+- download-first library toolbar and right-rail selection/download panel
+- bulk download/delete for library items
+- per-row download action in the library list
+- inline playback controls
+- mix project creation/deletion
+- add-to-mix from library
+- crossfade editing and preview rendering
 - similar-music suggestions for completed tracks
 - downloader-ready recommendation resolution back into the conversion flow
 - in-memory rate limiting

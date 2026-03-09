@@ -3,6 +3,7 @@ import path from 'node:path';
 import { nanoid } from 'nanoid';
 
 import { config } from './config.js';
+import { ingestLibraryTrack } from './libraryStore.js';
 import { parseYtDlpProgressLine } from './progress.js';
 import type {
   BatchConversionRequest,
@@ -378,6 +379,17 @@ async function runSingleItem(
         );
       }
     },
+  });
+
+  await ingestLibraryTrack({
+    sourcePath: outputPath,
+    originalFileName: `${safeTitle}.${format}`,
+    title,
+    sourceType: 'downloaded',
+    sourceUrl: item.url,
+    format,
+    durationSeconds: item.durationSeconds,
+    importToken: `download:${jobId}:${item.id}`,
   });
 
   updateItem(

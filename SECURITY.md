@@ -14,6 +14,16 @@ This project is a local-first media-to-audio converter intended for development 
 - raw backend error traces are sanitized before reaching the UI
 - rate limiting exists on job creation
 
+## Local-First Data Model
+
+- downloaded audio files are stored on local disk
+- uploaded library tracks are stored on local disk
+- library metadata persists locally on the host machine
+- mix project metadata persists locally on the host machine
+- active job state and rate limits remain in memory
+
+This improves local workflow continuity, but it also means anyone with filesystem access to the host can inspect stored media, library metadata, and mix project files.
+
 ## Important Privacy Limitation
 
 If this app runs on your laptop, the remote media source still sees the outbound IP/network path used by your laptop unless you route traffic differently.

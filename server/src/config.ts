@@ -20,6 +20,7 @@ export const config = {
   clientOrigin: process.env.CLIENT_ORIGIN ?? 'http://localhost:5173',
   outputDir: path.resolve(rootDir, process.env.OUTPUT_DIR ?? './output'),
   tempDir: path.resolve(rootDir, process.env.TEMP_DIR ?? './tmp'),
+  libraryDir: path.resolve(rootDir, process.env.LIBRARY_DIR ?? './data/library'),
   maxConcurrentJobs,
   jobRetentionMs,
   ytDlpPath: process.env.YT_DLP_PATH ?? 'yt-dlp',

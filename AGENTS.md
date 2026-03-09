@@ -34,7 +34,7 @@ Core flow:
 - `server/src/validation.ts`
   Input validation and private/local network blocking.
 - `client/src/App.tsx`
-  Main UI for source selection, serial conversion, recommendation lookup, and rate-limit messaging.
+  Main workspace UI for Convert, Library, Mix, and Similar.
 - `.env`
   Runtime configuration, especially `YT_DLP_PATH`, `FFMPEG_PATH`, `LASTFM_API_KEY`, and `MUSICBRAINZ_CONTACT`.
 
@@ -92,15 +92,28 @@ npm run dev
 
 ## Current Features
 
+- workspace tabs for `Convert`, `Library`, `Mix`, and `Similar`
 - URL submission
 - source inspection for multi-video pages
 - check/uncheck batch selection
+- duration/size filtering before conversion
 - serial conversion queue
 - `mp3` and `m4a` output
 - `standard` and `high` quality presets
 - job polling
 - approximate progress updates
 - preview and download UI
+- persistent local track library
+- local uploads
+- download-first library toolbar and compact download rail
+- bulk download/delete
+- per-row download action
+- playback controls
+- mix project creation/deletion
+- add to mix
+- crossfade editing
+- preview render
+- preview playback
 - similar-music suggestions for completed tracks
 - downloader-ready recommendation resolution for one-click follow-up conversions
 - in-memory rate limiting

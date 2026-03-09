@@ -8,7 +8,7 @@ Recommended architecture:
 2. Keep the app bound to `127.0.0.1`.
 3. Expose it through Cloudflare Tunnel.
 4. Protect it with Cloudflare Access and an allowlist of known email addresses.
-5. Have users install it from the browser as a web app icon if they want a desktop-like shortcut.
+5. Have users install it from the browser as a web app icon if they want a desktop-style shortcut into the workspace UI.
 
 ## Why this is the recommended setup
 
@@ -119,6 +119,8 @@ Send trusted users:
 ### Browser access
 
 Users just open the protected URL and sign in.
+
+Once inside, they land in the browser workspace with separate `Convert`, `Library`, `Mix`, and `Similar` tabs. That structure works well for trusted, repeat users because local library and mix workflows are more discoverable than a single long page.
 
 ### Install as an app icon
 

@@ -21,6 +21,59 @@ export interface SourceInspection {
   estimatedTotalSeconds?: number;
 }
 
+export type LibrarySourceType = 'downloaded' | 'uploaded' | 'imported';
+
+export interface LibraryTrack {
+  id: string;
+  title: string;
+  artist?: string;
+  durationSeconds?: number;
+  sizeBytes: number;
+  format: string;
+  sourceType: LibrarySourceType;
+  createdAt: string;
+  sourceUrl?: string;
+  filePath: string;
+  waveformPath?: string;
+  originalFileName: string;
+  importToken?: string;
+  meanVolumeDb?: number;
+  suggestedMixInSeconds?: number;
+  suggestedMixOutSeconds?: number;
+}
+
+export interface MixProjectTrack {
+  id: string;
+  trackId: string;
+  overlapSeconds: number;
+}
+
+export interface MixProjectTimelineItem extends MixProjectTrack {
+  title: string;
+  filePath: string;
+  waveformPath?: string;
+  durationSeconds?: number;
+  startSeconds: number;
+  endSeconds: number;
+}
+
+export interface MixProject {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  tracks: MixProjectTrack[];
+  totalDurationSeconds: number;
+  timeline: MixProjectTimelineItem[];
+}
+
+export interface MixPreview {
+  projectId: string;
+  filePath: string;
+  renderedAt: string;
+  durationSeconds: number;
+}
+
 export interface RecommendationSeed {
   title: string;
   artist?: string;

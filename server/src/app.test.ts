@@ -2,7 +2,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import httpMocks from 'node-mocks-http';
 import type { Request, Response } from 'express';
 
-import { handleCreateJob, handleInspectSource, handleRecommendations, handleResolveRecommendation } from './app.js';
+import {
+  handleAddTrackToMixProject,
+  handleCreateJob,
+  handleDeleteMixProject,
+  handleCreateMixProject,
+  handleImportLibraryOutputs,
+  handleInspectSource,
+  handleListLibrary,
+  handleListMixProjects,
+  handleRecommendations,
+  handleRenderMixPreview,
+  handleResolveRecommendation,
+  handleUpdateMixTrack,
+} from './app.js';
 import { resetRateLimits } from './rateLimit.js';
 
 vi.mock('./mediaTools.js', () => ({
@@ -100,6 +113,110 @@ vi.mock('./recommendations.js', () => ({
   })),
 }));
 
+vi.mock('./libraryStore.js', () => ({
+  listLibraryTracks: vi.fn(async () => [
+    {
+      id: 'track-1',
+      title: 'Stored track',
+      durationSeconds: 180,
+      sizeBytes: 4560000,
+      format: 'mp3',
+      sourceType: 'downloaded',
+      createdAt: '2026-03-06T00:00:00.000Z',
+      filePath: '/library/files/track-1.mp3',
+      waveformPath: '/library/waveforms/track-1.png',
+      originalFileName: 'track-1.mp3',
+    },
+  ]),
+  importExistingOutputs: vi.fn(async () => [
+    {
+      id: 'track-2',
+      title: 'Imported track',
+      durationSeconds: 240,
+      sizeBytes: 5560000,
+      format: 'mp3',
+      sourceType: 'imported',
+      createdAt: '2026-03-06T00:00:00.000Z',
+      filePath: '/library/files/track-2.mp3',
+      waveformPath: '/library/waveforms/track-2.png',
+      originalFileName: 'track-2.mp3',
+    },
+  ]),
+  ingestLibraryTrack: vi.fn(),
+}));
+
+vi.mock('./mixStore.js', () => ({
+  listMixProjects: vi.fn(async () => [
+    {
+      id: 'mix-1',
+      name: 'Warmup set',
+      createdAt: '2026-03-06T00:00:00.000Z',
+      updatedAt: '2026-03-06T00:00:00.000Z',
+      tracks: [],
+      totalDurationSeconds: 0,
+      timeline: [],
+    },
+  ]),
+  createMixProject: vi.fn(async (name: string) => ({
+    id: 'mix-2',
+    name,
+    createdAt: '2026-03-06T00:00:00.000Z',
+    updatedAt: '2026-03-06T00:00:00.000Z',
+    tracks: [],
+    totalDurationSeconds: 0,
+    timeline: [],
+  })),
+  addTrackToMixProject: vi.fn(async (_projectId: string, trackId: string) => ({
+    id: 'mix-2',
+    name: 'Warmup set',
+    createdAt: '2026-03-06T00:00:00.000Z',
+    updatedAt: '2026-03-06T00:00:00.000Z',
+    tracks: [{ id: 'mix-track-1', trackId, overlapSeconds: 12 }],
+    totalDurationSeconds: 180,
+    timeline: [
+      {
+        id: 'mix-track-1',
+        trackId,
+        overlapSeconds: 12,
+        title: 'Stored track',
+        filePath: '/library/files/track-1.mp3',
+        waveformPath: '/library/waveforms/track-1.png',
+        durationSeconds: 180,
+        startSeconds: 0,
+        endSeconds: 180,
+      },
+    ],
+  })),
+  updateMixTrackOverlap: vi.fn(async (_projectId: string, mixTrackId: string, overlapSeconds: number) => ({
+    id: 'mix-2',
+    name: 'Warmup set',
+    createdAt: '2026-03-06T00:00:00.000Z',
+    updatedAt: '2026-03-06T00:00:00.000Z',
+    tracks: [{ id: mixTrackId, trackId: 'track-1', overlapSeconds }],
+    totalDurationSeconds: 180,
+    timeline: [
+      {
+        id: mixTrackId,
+        trackId: 'track-1',
+        overlapSeconds,
+        title: 'Stored track',
+        filePath: '/library/files/track-1.mp3',
+        waveformPath: '/library/waveforms/track-1.png',
+        durationSeconds: 180,
+        startSeconds: 0,
+        endSeconds: 180,
+      },
+    ],
+  })),
+  deleteMixProject: vi.fn(async () => undefined),
+  renderMixPreview: vi.fn(async (projectId: string) => ({
+    projectId,
+    filePath: `/library/previews/${projectId}.mp3?v=123`,
+    renderedAt: '2026-03-06T00:00:00.000Z',
+    durationSeconds: 170,
+  })),
+}));
+
 describe('app handlers', () => {
   afterEach(() => {
     resetRateLimits();
@@ -167,6 +284,96 @@ describe('app handlers', () => {
     return res;
   }
 
+  async function sendLibraryList() {
+    const req = httpMocks.createRequest<Request>({
+      method: 'GET',
+      url: '/api/library',
+    });
+    const res = httpMocks.createResponse<Response>();
+    await handleListLibrary(req, res);
+    return res;
+  }
+
+  async function sendLibraryImport() {
+    const req = httpMocks.createRequest<Request>({
+      method: 'POST',
+      url: '/api/library/import-existing',
+    });
+    const res = httpMocks.createResponse<Response>();
+    await handleImportLibraryOutputs(req, res);
+    return res;
+  }
+
+  async function sendMixList() {
+    const req = httpMocks.createRequest<Request>({
+      method: 'GET',
+      url: '/api/mixes',
+    });
+    const res = httpMocks.createResponse<Response>();
+    await handleListMixProjects(req, res);
+    return res;
+  }
+
+  async function sendCreateMix(payload: unknown) {
+    const req = httpMocks.createRequest<Request>({
+      method: 'POST',
+      url: '/api/mixes',
+      headers: { 'content-type': 'application/json' },
+      body: payload as Record<string, unknown>,
+    });
+    const res = httpMocks.createResponse<Response>();
+    await handleCreateMixProject(req, res);
+    return res;
+  }
+
+  async function sendAddTrackToMix(projectId: string, payload: unknown) {
+    const req = httpMocks.createRequest<Request>({
+      method: 'POST',
+      url: `/api/mixes/${projectId}/tracks`,
+      params: { id: projectId },
+      headers: { 'content-type': 'application/json' },
+      body: payload as Record<string, unknown>,
+    });
+    const res = httpMocks.createResponse<Response>();
+    await handleAddTrackToMixProject(req, res);
+    return res;
+  }
+
+  async function sendUpdateMixTrack(projectId: string, mixTrackId: string, payload: unknown) {
+    const req = httpMocks.createRequest<Request>({
+      method: 'PATCH',
+      url: `/api/mixes/${projectId}/tracks/${mixTrackId}`,
+      params: { id: projectId, trackId: mixTrackId },
+      headers: { 'content-type': 'application/json' },
+      body: payload as Record<string, unknown>,
+    });
+    const res = httpMocks.createResponse<Response>();
+    await handleUpdateMixTrack(req, res);
+    return res;
+  }
+
+  async function sendDeleteMix(projectId: string) {
+    const req = httpMocks.createRequest<Request>({
+      method: 'DELETE',
+      url: `/api/mixes/${projectId}`,
+      params: { id: projectId },
+    });
+    const res = httpMocks.createResponse<Response>();
+    await handleDeleteMixProject(req, res);
+    return res;
+  }
+
+  async function sendRenderMixPreview(projectId: string) {
+    const req = httpMocks.createRequest<Request>({
+      method: 'POST',
+      url: `/api/mixes/${projectId}/preview`,
+      params: { id: projectId },
+    });
+    const res = httpMocks.createResponse<Response>();
+    await handleRenderMixPreview(req, res);
+    return res;
+  }
+
   it('inspects a list source', async () => {
     const response = await sendInspect({
       url: 'https://www.youtube.com/@Revealedrec/videos',
@@ -207,6 +414,62 @@ describe('app handlers', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response._getJSONData().recommendations).toHaveLength(1);
+  });
+
+  it('lists library tracks', async () => {
+    const response = await sendLibraryList();
+
+    expect(response.statusCode).toBe(200);
+    expect(response._getJSONData().tracks).toHaveLength(1);
+  });
+
+  it('imports existing output files into the library', async () => {
+    const response = await sendLibraryImport();
+
+    expect(response.statusCode).toBe(200);
+    expect(response._getJSONData().tracks).toHaveLength(1);
+  });
+
+  it('lists mix projects', async () => {
+    const response = await sendMixList();
+
+    expect(response.statusCode).toBe(200);
+    expect(response._getJSONData().projects).toHaveLength(1);
+  });
+
+  it('creates a mix project', async () => {
+    const response = await sendCreateMix({ name: 'Warmup set' });
+
+    expect(response.statusCode).toBe(201);
+    expect(response._getJSONData().project.name).toBe('Warmup set');
+  });
+
+  it('adds a track to a mix project', async () => {
+    const response = await sendAddTrackToMix('mix-2', { trackId: 'track-1' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response._getJSONData().project.timeline).toHaveLength(1);
+  });
+
+  it('updates overlap for a mix track', async () => {
+    const response = await sendUpdateMixTrack('mix-2', 'mix-track-1', { overlapSeconds: 18 });
+
+    expect(response.statusCode).toBe(200);
+    expect(response._getJSONData().project.timeline[0].overlapSeconds).toBe(18);
+  });
+
+  it('deletes a mix project', async () => {
+    const response = await sendDeleteMix('mix-2');
+
+    expect(response.statusCode).toBe(204);
+    expect(response._getData()).toBe('');
+  });
+
+  it('renders a mix preview', async () => {
+    const response = await sendRenderMixPreview('mix-2');
+
+    expect(response.statusCode).toBe(200);
+    expect(response._getJSONData().preview.filePath).toContain('/library/previews/mix-2.mp3');
   });
 
   it('resolves a recommendation to a downloadable source', async () => {
